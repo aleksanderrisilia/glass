@@ -10,6 +10,7 @@ const presetRepository = require('../features/common/repositories/preset');
 const localAIManager = require('../features/common/services/localAIManager');
 const askService = require('../features/ask/askService');
 const listenService = require('../features/listen/listenService');
+const readService = require('../features/read/readService');
 const permissionService = require('../features/common/services/permissionService');
 const encryptionService = require('../features/common/services/encryptionService');
 
@@ -106,6 +107,21 @@ module.exports = {
         console.error('[FeatureBridge] listen:changeSession failed', error.message);
         return { success: false, error: error.message };
       }
+    });
+
+    // Read
+    ipcMain.handle('read:readCurrentTab', async () => {
+      console.log('[FeatureBridge] read:readCurrentTab requested');
+      try {
+        const result = await readService.readCurrentTab();
+        return result;
+      } catch (error) {
+        console.error('[FeatureBridge] read:readCurrentTab failed', error.message);
+        return { success: false, error: error.message };
+      }
+    });
+    ipcMain.handle('read:getLatestContent', async (event, sessionId) => {
+      return await readService.getLatestReadContent(sessionId);
     });
 
     // ModelStateService

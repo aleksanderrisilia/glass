@@ -114,6 +114,18 @@ const LATEST_SCHEMA = {
             { name: 'uid', type: 'TEXT PRIMARY KEY' },
             { name: 'keychain_completed', type: 'INTEGER DEFAULT 0' }
         ]
+    },
+    read_content: {
+        columns: [
+            { name: 'id', type: 'TEXT PRIMARY KEY' },
+            { name: 'session_id', type: 'TEXT NOT NULL' },
+            { name: 'url', type: 'TEXT' },
+            { name: 'title', type: 'TEXT' },
+            { name: 'html_content', type: 'TEXT' },
+            { name: 'read_at', type: 'INTEGER' },
+            { name: 'created_at', type: 'INTEGER' },
+            { name: 'sync_state', type: 'TEXT DEFAULT \'clean\'' }
+        ]
     }
 };
 

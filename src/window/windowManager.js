@@ -444,7 +444,9 @@ function createFeatureWindows(header, namesToCreate) {
         hasShadow: false,
         skipTaskbar: true,
         hiddenInMissionControl: true,
-        resizable: false,
+        resizable: true, // Allow resizing to fit content
+        minWidth: 350,
+        maxWidth: 600, // Prevent it from getting too wide
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -639,7 +641,7 @@ function getCurrentDisplay(window) {
 
 function createWindows() {
     const HEADER_HEIGHT        = 47;
-    const DEFAULT_WINDOW_WIDTH = 353;
+    const DEFAULT_WINDOW_WIDTH = 520; // Increased to accommodate Listen + Read + Ask + Show/Hide + Settings buttons
 
     const primaryDisplay = screen.getPrimaryDisplay();
     const { y: workAreaY, width: screenWidth } = primaryDisplay.workArea;
@@ -659,7 +661,9 @@ function createWindows() {
         alwaysOnTop: true,
         skipTaskbar: true,
         hiddenInMissionControl: true,
-        resizable: false,
+        resizable: true, // Allow resizing so header can grow if needed
+        minWidth: 350,
+        maxWidth: 800, // Max width to prevent it from getting too wide
         focusable: true,
         acceptFirstMouse: true,
         webPreferences: {
@@ -710,6 +714,47 @@ function createWindows() {
     header.webContents.once('dom-ready', () => {
         shortcutsService.initialize(windowPool);
         shortcutsService.registerShortcuts();
+        
+        // Auto-resize header window to fit all content (including settings button)
+        const resizeHeader = () => {
+            header.webContents.executeJavaScript(`
+                (() => {
+                    const headerEl = document.querySelector('main-header');
+                    if (headerEl && headerEl.shadowRoot) {
+                        const headerDiv = headerEl.shadowRoot.querySelector('.header');
+                        if (headerDiv) {
+                            const rect = headerDiv.getBoundingClientRect();
+                            // Add extra padding to ensure nothing is cut off
+                            return { width: Math.ceil(rect.width) + 30, height: Math.ceil(rect.height) + 4 };
+                        }
+                    }
+                    return null;
+                })();
+            `).then(size => {
+                if (size && size.width > 0) {
+                    const currentBounds = header.getBounds();
+                    const centerX = currentBounds.x + currentBounds.width / 2;
+                    const newX = Math.round(centerX - size.width / 2);
+                    header.setBounds({ 
+                        x: newX, 
+                        y: currentBounds.y, 
+                        width: size.width, 
+                        height: size.height 
+                    });
+                    console.log(`[WindowManager] Auto-resized header to ${size.width}x${size.height}`);
+                }
+            }).catch(err => console.warn('[WindowManager] Auto-resize failed:', err));
+        };
+        
+        // Try multiple times to ensure content is loaded
+        setTimeout(resizeHeader, 100);
+        setTimeout(resizeHeader, 300);
+        setTimeout(resizeHeader, 500);
+        
+        // Also resize when content finishes loading
+        header.webContents.once('did-finish-load', () => {
+            setTimeout(resizeHeader, 100);
+        });
     });
 
     setupIpcHandlers(windowPool, layoutManager);

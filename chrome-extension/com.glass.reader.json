@@ -1,0 +1,10 @@
+{
+  "name": "com.glass.reader",
+  "description": "Glass Tab Reader Native Messaging Host",
+  "path": "native-host.js",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://EXTENSION_ID_HERE/"
+  ]
+}
+

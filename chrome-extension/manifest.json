@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Glass - Tab Reader",
+  "version": "1.0.0",
+  "description": "Reads current tab content for Glass AI assistant",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage",
+    "scripting",
+    "alarms",
+    "notifications",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "persistent": false
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
+

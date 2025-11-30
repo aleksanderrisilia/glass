@@ -14,6 +14,7 @@ const getWindowPool = () => {
 
 const sessionRepository = require('../common/repositories/session');
 const askRepository = require('./repositories');
+const readRepository = require('../read/repositories');
 const { getSystemPrompt } = require('../common/prompts/promptBuilder');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -252,26 +253,82 @@ class AskService {
             const screenshotResult = await captureScreenshot({ quality: 'medium' });
             const screenshotBase64 = screenshotResult.success ? screenshotResult.base64 : null;
 
+            // Get latest read content for this session (if available)
+            let readContent = null;
+            try {
+                readContent = await readRepository.getLatestBySessionId(sessionId);
+            } catch (error) {
+                console.warn('[AskService] Failed to get read content:', error);
+            }
+
             const conversationHistory = this._formatConversationForPrompt(conversationHistoryRaw);
 
-            const systemPrompt = getSystemPrompt('pickle_glass_analysis', conversationHistory, false);
+            // Check if read content is recent (within last 5 minutes)
+            let useReadContent = false;
+            let readTextContent = '';
+            if (readContent && readContent.html_content) {
+                const now = Math.floor(Date.now() / 1000);
+                const readTime = readContent.read_at || readContent.created_at;
+                const timeDiff = now - readTime;
+                
+                // Use read content if it's less than 5 minutes old
+                if (timeDiff < 300) {
+                    useReadContent = true;
+                    // Extract text from HTML (simple approach - remove tags)
+                    readTextContent = readContent.html_content
+                        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+                        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                        .replace(/<[^>]+>/g, ' ')
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                        .substring(0, 50000); // Limit to 50k chars for better context
+                    
+                    console.log(`[AskService] Using read content from ${readContent.url} (${readTextContent.length} chars)`);
+                }
+            }
+
+            // Build context string - prioritize read content over conversation history when available
+            let contextString = conversationHistory;
+            if (useReadContent) {
+                contextString = `Chrome Tab Content (from ${readContent.url || 'current tab'}):\n${readTextContent}\n\n${conversationHistory}`;
+            }
+
+            const systemPrompt = getSystemPrompt('pickle_glass_analysis', contextString, false);
+
+            // Build user message - include read content prominently if available
+            const userMessageContent = [];
+            
+            if (useReadContent) {
+                // Add read content as text in user message (more prominent than system prompt)
+                userMessageContent.push({
+                    type: 'text',
+                    text: `Context from Chrome tab (${readContent.url || 'current tab'}):\n\n${readTextContent.substring(0, 30000)}\n\n---\n\nUser Request: ${userPrompt.trim()}`
+                });
+            } else {
+                // No read content, use normal format
+                userMessageContent.push({
+                    type: 'text',
+                    text: `User Request: ${userPrompt.trim()}`
+                });
+            }
+
+            // Only include screenshot if we don't have read content (read content is more accurate)
+            if (!useReadContent && screenshotBase64) {
+                userMessageContent.push({
+                    type: 'image_url',
+                    image_url: { url: `data:image/jpeg;base64,${screenshotBase64}` },
+                });
+            } else if (useReadContent) {
+                console.log('[AskService] Skipping screenshot - using read content instead');
+            }
 
             const messages = [
                 { role: 'system', content: systemPrompt },
                 {
                     role: 'user',
-                    content: [
-                        { type: 'text', text: `User Request: ${userPrompt.trim()}` },
-                    ],
+                    content: userMessageContent,
                 },
             ];
-
-            if (screenshotBase64) {
-                messages[1].content.push({
-                    type: 'image_url',
-                    image_url: { url: `data:image/jpeg;base64,${screenshotBase64}` },
-                });
-            }
             
             const streamingLLM = createStreamingLLM(modelInfo.provider, {
                 apiKey: modelInfo.apiKey,

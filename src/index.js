@@ -23,6 +23,7 @@ const fetch = require('node-fetch');
 const { autoUpdater } = require('electron-updater');
 const { EventEmitter } = require('events');
 const askService = require('./features/ask/askService');
+const readService = require('./features/read/readService');
 const settingsService = require('./features/settings/settingsService');
 const sessionRepository = require('./features/common/repositories/session');
 const modelStateService = require('./features/common/services/modelStateService');
@@ -200,6 +201,7 @@ app.whenReady().then(async () => {
 
         featureBridge.initialize();  // 추가: featureBridge 초기화
         windowBridge.initialize();
+        readService.initialize();
         setupWebDataHandlers();
 
         // Initialize Ollama models in database
@@ -602,7 +604,9 @@ async function startWebStack() {
     });
   };
 
-  const apiPort = await getAvailablePort();
+  // Use fixed port for API (so Chrome extension can always find it)
+  const FIXED_API_PORT = 51173;
+  const apiPort = FIXED_API_PORT;
   const frontendPort = await getAvailablePort();
 
   console.log(`🔧 Allocated ports: API=${apiPort}, Frontend=${frontendPort}`);
@@ -679,7 +683,24 @@ async function startWebStack() {
   apiSrv.use(nodeApi);
 
   const apiServer = await new Promise((resolve, reject) => {
-    const server = apiSrv.listen(apiPort, '127.0.0.1', () => resolve(server));
+    const server = apiSrv.listen(apiPort, '127.0.0.1', (err) => {
+      if (err) {
+        // If port is in use, try to find another (fallback)
+        console.warn(`[API] Port ${apiPort} is in use, trying alternative...`);
+        const fallbackServer = apiSrv.listen(0, '127.0.0.1', (fallbackErr) => {
+          if (fallbackErr) reject(fallbackErr);
+          else {
+            const actualPort = fallbackServer.address().port;
+            console.warn(`[API] Using fallback port ${actualPort} instead of ${apiPort}`);
+            resolve(fallbackServer);
+          }
+        });
+        fallbackServer.on('error', reject);
+        app.once('before-quit', () => fallbackServer.close());
+      } else {
+        resolve(server);
+      }
+    });
     server.on('error', reject);
     app.once('before-quit', () => server.close());
   });

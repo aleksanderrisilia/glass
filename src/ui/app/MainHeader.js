@@ -3,6 +3,7 @@ import { html, css, LitElement } from '../assets/lit-core-2.7.4.min.js';
 export class MainHeader extends LitElement {
     static properties = {
         isTogglingSession: { type: Boolean, state: true },
+        isReading: { type: Boolean, state: true },
         shortcuts: { type: Object, state: true },
         listenSessionStatus: { type: String, state: true },
     };
@@ -41,17 +42,20 @@ export class MainHeader extends LitElement {
         .header {
             -webkit-app-region: drag;
             width: max-content;
+            min-width: fit-content;
             height: 47px;
-            padding: 2px 10px 2px 13px;
+            padding: 2px 15px 2px 13px; /* Increased right padding to ensure settings button isn't cut off */
             background: transparent;
-            overflow: hidden;
+            overflow: visible;
             border-radius: 9000px;
             /* backdrop-filter: blur(1px); */
-            justify-content: space-between;
+            justify-content: flex-start; /* Changed from space-between to flex-start for better control */
             align-items: center;
             display: inline-flex;
             box-sizing: border-box;
             position: relative;
+            flex-wrap: nowrap;
+            gap: 0; /* No gap between items */
         }
 
         .header::before {
@@ -203,6 +207,56 @@ export class MainHeader extends LitElement {
 
         .header-actions:hover {
             background: rgba(255, 255, 255, 0.1);
+        }
+
+        .read-button {
+            -webkit-app-region: no-drag;
+            height: 26px;
+            padding: 0 13px;
+            background: transparent;
+            border-radius: 9000px;
+            justify-content: center;
+            width: 78px;
+            align-items: center;
+            gap: 6px;
+            display: flex;
+            border: none;
+            cursor: pointer;
+            position: relative;
+            margin-left: 4px;
+        }
+
+        .read-button:disabled {
+            cursor: default;
+            opacity: 0.5;
+        }
+
+        .read-button:hover::before {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .read-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border-radius: 9000px;
+            background: transparent;
+            transition: background 0.15s ease;
+            z-index: -1;
+        }
+
+        .read-button.active::before {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .read-icon svg {
+            width: 12px;
+            height: 12px;
+            position: relative;
+            top: 1px;
         }
 
         .ask-action {
@@ -550,6 +604,28 @@ export class MainHeader extends LitElement {
         }
     }
 
+    async _handleReadClick() {
+        if (this.wasJustDragged || this.isReading) return;
+
+        this.isReading = true;
+        try {
+            if (window.api) {
+                const result = await window.api.mainHeader.sendReadButtonClick();
+                if (result && result.success) {
+                    // Show success message or update UI
+                    console.log('[MainHeader] Read successful:', result.data);
+                } else if (result && result.error) {
+                    console.error('[MainHeader] Read failed:', result.error);
+                    // Could show error message to user
+                }
+            }
+        } catch (error) {
+            console.error('IPC invoke for read button failed:', error);
+        } finally {
+            this.isReading = false;
+        }
+    }
+
     async _handleAskClick() {
         if (this.wasJustDragged) return;
 
@@ -638,6 +714,29 @@ export class MainHeader extends LitElement {
                                             <path d="M8.57922 3.0955C8.57922 2.71553 8.88725 2.4075 9.26722 2.4075H9.61122C9.99119 2.4075 10.2992 2.71553 10.2992 3.0955V7.9115C10.2992 8.29147 9.99119 8.5995 9.61122 8.5995H9.26722C8.88725 8.5995 8.57922 8.29147 8.57922 7.9115V3.0955Z" fill="white"/>
                                         </svg>
                                     `}
+                            </div>
+                        `}
+                </button>
+
+                <button 
+                    class="read-button ${this.isReading ? 'active' : ''}"
+                    @click=${this._handleReadClick}
+                    ?disabled=${this.isReading}
+                >
+                    ${this.isReading
+                        ? html`
+                            <div class="loading-dots">
+                                <span></span><span></span><span></span>
+                            </div>
+                        `
+                        : html`
+                            <div class="action-text">
+                                <div class="action-text-content">Read</div>
+                            </div>
+                            <div class="read-icon">
+                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M6 1L2 5H5V11H7V5H10L6 1Z" fill="white"/>
+                                </svg>
                             </div>
                         `}
                 </button>

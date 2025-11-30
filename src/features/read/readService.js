@@ -1,9 +1,12 @@
-const { BrowserWindow } = require('electron');
+const { BrowserWindow, dialog } = require('electron');
 const sessionRepository = require('../common/repositories/session');
 const readRepository = require('./repositories');
 const internalBridge = require('../../bridge/internalBridge');
 const fetch = require('node-fetch');
 const WebSocket = require('ws');
+const pdfService = require('./pdfService');
+const pdfDetector = require('./pdfDetector');
+const wordService = require('./wordService');
 
 class ReadService {
     constructor() {
@@ -152,6 +155,330 @@ class ReadService {
                 }
             }, 10000);
         });
+    }
+
+    /**
+     * Read a PDF file
+     * @param {string} filePath - Path to PDF file
+     * @returns {Promise<{success: boolean, error?: string, data?: Object}>}
+     */
+    async readPDF(filePath) {
+        try {
+            console.log('[ReadService] Reading PDF file:', filePath);
+
+            // Get or create active session
+            const sessionId = await sessionRepository.getOrCreateActive('ask');
+            this.currentSessionId = sessionId;
+
+            // Extract text from PDF using LLM transcription with progress reporting
+            console.log('[ReadService] Starting LLM transcription for PDF...');
+            
+            // Progress callback to send updates to renderer
+            const progressCallback = (progress) => {
+                this.sendToRenderer('read-progress', {
+                    currentPage: progress.currentPage,
+                    totalPages: progress.totalPages,
+                    progress: progress.progress,
+                    status: progress.status
+                });
+            };
+            
+            const pdfResult = await pdfService.extractTextFromPDF(filePath, {
+                onProgress: progressCallback
+            });
+            
+            if (!pdfResult.success) {
+                console.error('[ReadService] PDF transcription failed:', pdfResult.error);
+                this.sendToRenderer('read-error', {
+                    success: false,
+                    error: pdfResult.error || 'Failed to transcribe PDF with LLM'
+                });
+                return {
+                    success: false,
+                    error: pdfResult.error || 'Failed to transcribe PDF with LLM'
+                };
+            }
+            
+            console.log(`[ReadService] PDF transcription completed: ${pdfResult.text.length} characters, method: ${pdfResult.method}`);
+
+            // Store the extracted text
+            const fileName = require('path').basename(filePath);
+            const uid = require('../common/services/authService').getCurrentUserId();
+            const result = await readRepository.create({
+                sessionId: sessionId,
+                url: `file://${filePath}`,
+                title: fileName,
+                htmlContent: pdfResult.text // Store as HTML content for consistency
+            });
+
+            this.currentReadContent = {
+                id: result.id,
+                session_id: sessionId,
+                url: `file://${filePath}`,
+                title: fileName,
+                html_content: pdfResult.text,
+                read_at: Math.floor(Date.now() / 1000)
+            };
+
+            console.log(`[ReadService] PDF read and stored: ${fileName} (${pdfResult.text.length} chars, method: ${pdfResult.method})`);
+
+            this.sendToRenderer('read-complete', {
+                success: true,
+                url: `file://${filePath}`,
+                title: fileName,
+                contentLength: pdfResult.text.length,
+                method: pdfResult.method
+            });
+
+            return {
+                success: true,
+                data: {
+                    id: result.id,
+                    url: `file://${filePath}`,
+                    title: fileName,
+                    contentLength: pdfResult.text.length,
+                    pageCount: pdfResult.pageCount,
+                    method: pdfResult.method,
+                    message: 'PDF read successfully'
+                }
+            };
+
+        } catch (error) {
+            console.error('[ReadService] Error reading PDF:', error);
+            const errorMessage = error.message || 'Unknown error occurred';
+            
+            this.sendToRenderer('read-error', {
+                success: false,
+                error: errorMessage
+            });
+
+            return {
+                success: false,
+                error: errorMessage
+            };
+        }
+    }
+
+    /**
+     * Read Word document
+     * @param {string} filePath - Path to Word document file
+     * @returns {Promise<{success: boolean, error?: string, data?: Object}>}
+     */
+    async readWord(filePath) {
+        try {
+            console.log('[ReadService] Reading Word document file:', filePath);
+
+            // Get or create active session
+            const sessionId = await sessionRepository.getOrCreateActive('ask');
+            this.currentSessionId = sessionId;
+
+            // Extract text from Word document
+            console.log('[ReadService] Starting text extraction from Word document...');
+            
+            // Progress callback to send updates to renderer
+            const progressCallback = (progress) => {
+                this.sendToRenderer('read-progress', {
+                    currentPage: progress.currentPage,
+                    totalPages: progress.totalPages,
+                    progress: progress.progress,
+                    status: progress.status
+                });
+            };
+            
+            const wordResult = await wordService.extractTextFromWord(filePath, {
+                onProgress: progressCallback
+            });
+            
+            if (!wordResult.success) {
+                console.error('[ReadService] Word document extraction failed:', wordResult.error);
+                this.sendToRenderer('read-error', {
+                    success: false,
+                    error: wordResult.error || 'Failed to extract text from Word document'
+                });
+                return {
+                    success: false,
+                    error: wordResult.error || 'Failed to extract text from Word document'
+                };
+            }
+            
+            console.log(`[ReadService] Word document extraction completed: ${wordResult.text.length} characters, method: ${wordResult.method}`);
+
+            // Store the extracted text
+            const fileName = require('path').basename(filePath);
+            const uid = require('../common/services/authService').getCurrentUserId();
+            const result = await readRepository.create({
+                sessionId: sessionId,
+                url: `file://${filePath}`,
+                title: fileName,
+                htmlContent: wordResult.text // Store as HTML content for consistency
+            });
+
+            this.currentReadContent = {
+                id: result.id,
+                session_id: sessionId,
+                url: `file://${filePath}`,
+                title: fileName,
+                html_content: wordResult.text,
+                read_at: Math.floor(Date.now() / 1000)
+            };
+
+            console.log(`[ReadService] Word document read and stored: ${fileName} (${wordResult.text.length} chars, method: ${wordResult.method})`);
+
+            this.sendToRenderer('read-complete', {
+                success: true,
+                url: `file://${filePath}`,
+                title: fileName,
+                contentLength: wordResult.text.length,
+                method: wordResult.method
+            });
+
+            return {
+                success: true,
+                data: {
+                    id: result.id,
+                    url: `file://${filePath}`,
+                    title: fileName,
+                    contentLength: wordResult.text.length,
+                    method: wordResult.method,
+                    message: 'Word document read successfully'
+                }
+            };
+
+        } catch (error) {
+            console.error('[ReadService] Error reading Word document:', error);
+            const errorMessage = error.message || 'Unknown error occurred';
+            
+            this.sendToRenderer('read-error', {
+                success: false,
+                error: errorMessage
+            });
+
+            return {
+                success: false,
+                error: errorMessage
+            };
+        }
+    }
+
+    /**
+     * Read Word document - shows file picker
+     * @returns {Promise<{success: boolean, error?: string, data?: Object}>}
+     */
+    async readWordFromFilePicker() {
+        try {
+            console.log('[ReadService] Showing file picker for Word document...');
+            const { dialog } = require('electron');
+            const mainWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            
+            if (!mainWindow) {
+                throw new Error('No window available for file picker');
+            }
+
+            const result = await dialog.showOpenDialog(mainWindow, {
+                title: 'Select Word Document',
+                filters: [
+                    { name: 'Word Documents', extensions: ['docx'] },
+                    { name: 'All Files', extensions: ['*'] }
+                ],
+                properties: ['openFile']
+            });
+
+            if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+                // Send canceled event to renderer
+                this.sendToRenderer('read-error', {
+                    success: false,
+                    error: 'No file selected',
+                    canceled: true
+                });
+                return {
+                    success: false,
+                    error: 'No file selected',
+                    canceled: true
+                };
+            }
+
+            const filePath = result.filePaths[0];
+            // Start reading asynchronously - it will send completion/error events via sendToRenderer
+            // Return immediately so UI can show loading state
+            this.readWord(filePath).catch(error => {
+                console.error('[ReadService] Error in readWord:', error);
+                this.sendToRenderer('read-error', {
+                    success: false,
+                    error: error.message || 'Failed to read Word document'
+                });
+            });
+            
+            // Return immediately to allow UI to show loading state
+            // The actual completion will be signaled via read-complete/read-error events
+            return {
+                success: true,
+                message: 'Processing Word document...'
+            };
+
+        } catch (error) {
+            console.error('[ReadService] Error reading Word document:', error);
+            this.sendToRenderer('read-error', {
+                success: false,
+                error: error.message || 'Failed to read Word document'
+            });
+            return {
+                success: false,
+                error: error.message || 'Failed to read Word document'
+            };
+        }
+    }
+
+    /**
+     * Read PDF - tries to read currently open PDF first, falls back to file picker
+     * @returns {Promise<{success: boolean, error?: string, data?: Object}>}
+     */
+    async readPDFFromFilePicker() {
+        try {
+            // First, try to detect currently open PDF
+            console.log('[ReadService] Attempting to detect currently open PDF...');
+            const openPDF = await pdfDetector.getCurrentlyOpenPDF();
+            
+            if (openPDF) {
+                console.log(`[ReadService] Found open PDF: ${openPDF}`);
+                return await this.readPDF(openPDF);
+            }
+
+            // If no open PDF found, show file picker
+            console.log('[ReadService] No open PDF detected, showing file picker...');
+            const { dialog } = require('electron');
+            const mainWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            
+            if (!mainWindow) {
+                throw new Error('No window available for file picker');
+            }
+
+            const result = await dialog.showOpenDialog(mainWindow, {
+                title: 'Select PDF File',
+                filters: [
+                    { name: 'PDF Files', extensions: ['pdf'] },
+                    { name: 'All Files', extensions: ['*'] }
+                ],
+                properties: ['openFile']
+            });
+
+            if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+                return {
+                    success: false,
+                    error: 'No file selected',
+                    canceled: true
+                };
+            }
+
+            const filePath = result.filePaths[0];
+            return await this.readPDF(filePath);
+
+        } catch (error) {
+            console.error('[ReadService] Error reading PDF:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to read PDF'
+            };
+        }
     }
 
     /**

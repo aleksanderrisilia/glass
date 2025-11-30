@@ -35,6 +35,7 @@ let currentHeaderState = 'apikey';
 const windowPool = new Map();
 
 let settingsHideTimer = null;
+let readChoiceHideTimer = null;
 
 
 let layoutManager = null;
@@ -70,6 +71,18 @@ const hideSettingsWindow = () => {
 
 const cancelHideSettingsWindow = () => {
     internalBridge.emit('window:requestVisibility', { name: 'settings', visible: true });
+};
+
+const showReadChoiceWindow = () => {
+    internalBridge.emit('window:requestVisibility', { name: 'read-choice', visible: true });
+};
+
+const hideReadChoiceWindow = () => {
+    internalBridge.emit('window:requestVisibility', { name: 'read-choice', visible: false });
+};
+
+const cancelHideReadChoiceWindow = () => {
+    internalBridge.emit('window:requestVisibility', { name: 'read-choice', visible: true });
 };
 
 const moveWindowStep = (direction) => {
@@ -323,6 +336,40 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
         return;
     }
 
+    if (name === 'read-choice') {
+        if (shouldBeVisible) {
+            // Cancel any pending hide operations
+            if (readChoiceHideTimer) {
+                clearTimeout(readChoiceHideTimer);
+                readChoiceHideTimer = null;
+            }
+            const position = layoutManager.calculateReadChoiceWindowPosition();
+            if (position) {
+                win.setBounds(position);
+                win.__lockedByButton = true;
+                // Ensure window can receive mouse events and clicks
+                win.setIgnoreMouseEvents(false);
+                win.show();
+                win.moveTop();
+                win.setAlwaysOnTop(true);
+            } else {
+                console.warn('[WindowManager] Could not calculate read-choice window position.');
+            }
+        } else {
+            // Hide immediately when requested (from click outside or option click)
+            if (readChoiceHideTimer) {
+                clearTimeout(readChoiceHideTimer);
+                readChoiceHideTimer = null;
+            }
+            if (win && !win.isDestroyed()) {
+                win.setAlwaysOnTop(false);
+                win.hide();
+            }
+            win.__lockedByButton = false;
+        }
+        return;
+    }
+
 
     if (name === 'shortcut-settings') {
         if (shouldBeVisible) {
@@ -558,6 +605,94 @@ function createFeatureWindows(header, namesToCreate) {
                 break;
             }
 
+            case 'read-choice': {
+                const readChoice = new BrowserWindow({ ...commonChildOptions, width:350, height:140, parent:undefined });
+                readChoice.setContentProtection(isContentProtectionOn);
+                readChoice.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
+                if (process.platform === 'darwin') {
+                    readChoice.setWindowButtonVisibility(false);
+                }
+                const readChoiceLoadOptions = { query: { view: 'read-choice' } };
+                if (!shouldUseLiquidGlass) {
+                    readChoice.loadFile(path.join(__dirname,'../ui/app/content.html'), readChoiceLoadOptions)
+                        .catch(console.error);
+                }
+                else {
+                    readChoiceLoadOptions.query.glass = 'true';
+                    readChoice.loadFile(path.join(__dirname,'../ui/app/content.html'), readChoiceLoadOptions)
+                        .catch(console.error);
+                    readChoice.webContents.once('did-finish-load', () => {
+                        const viewId = liquidGlass.addView(readChoice.getNativeWindowHandle());
+                        if (viewId !== -1) {
+                            liquidGlass.unstable_setVariant(viewId, liquidGlass.GlassMaterialVariant.bubbles);
+                        }
+                    });
+                }
+                
+                // Handle clicks outside the window to close it
+                readChoice.webContents.on('did-finish-load', () => {
+                    readChoice.webContents.executeJavaScript(`
+                        (() => {
+                            // Listen for clicks on the document
+                            const handleClickOutside = (e) => {
+                                const container = document.querySelector('read-choice-view')?.shadowRoot?.querySelector('.read-choice-container');
+                                if (container && !container.contains(e.target)) {
+                                    // Click is outside the menu - close it
+                                    if (window.api && window.api.readChoiceView) {
+                                        window.api.readChoiceView.hideReadChoiceWindow();
+                                    }
+                                }
+                            };
+                            
+                            // Add click listener after a short delay to avoid immediate trigger
+                            setTimeout(() => {
+                                document.addEventListener('click', handleClickOutside, true);
+                            }, 100);
+                            
+                            // Clean up on unload
+                            window.addEventListener('beforeunload', () => {
+                                document.removeEventListener('click', handleClickOutside, true);
+                            });
+                        })();
+                    `).catch(console.error);
+                });
+                
+                // Handle clicks outside the window to close it
+                readChoice.webContents.on('did-finish-load', () => {
+                    readChoice.webContents.executeJavaScript(`
+                        (() => {
+                            // Listen for clicks on the document
+                            const handleClickOutside = (e) => {
+                                const container = document.querySelector('read-choice-view')?.shadowRoot?.querySelector('.read-choice-container');
+                                if (container && !container.contains(e.target)) {
+                                    // Click is outside the menu - close it
+                                    if (window.api && window.api.readChoiceView) {
+                                        window.api.readChoiceView.hideReadChoiceWindow();
+                                    }
+                                }
+                            };
+                            
+                            // Add click listener after a short delay to avoid immediate trigger
+                            setTimeout(() => {
+                                document.addEventListener('click', handleClickOutside, true);
+                            }, 100);
+                            
+                            // Clean up on unload
+                            window.addEventListener('beforeunload', () => {
+                                document.removeEventListener('click', handleClickOutside, true);
+                            });
+                        })();
+                    `).catch(console.error);
+                });
+                
+                windowPool.set('read-choice', readChoice);  
+
+                if (!app.isPackaged) {
+                    readChoice.webContents.openDevTools({ mode: 'detach' });
+                }
+                break;
+            }
+
             case 'shortcut-settings': {
                 const shortcutEditor = new BrowserWindow({
                     ...commonChildOptions,
@@ -607,14 +742,19 @@ function createFeatureWindows(header, namesToCreate) {
         createFeatureWindow('ask');
         createFeatureWindow('settings');
         createFeatureWindow('shortcut-settings');
+        createFeatureWindow('read-choice');
     }
 }
 
 function destroyFeatureWindows() {
-    const featureWindows = ['listen','ask','settings','shortcut-settings'];
+    const featureWindows = ['listen','ask','settings','shortcut-settings','read-choice'];
     if (settingsHideTimer) {
         clearTimeout(settingsHideTimer);
         settingsHideTimer = null;
+    }
+    if (readChoiceHideTimer) {
+        clearTimeout(readChoiceHideTimer);
+        readChoiceHideTimer = null;
     }
     featureWindows.forEach(name=>{
         const win = windowPool.get(name);
@@ -761,7 +901,7 @@ function createWindows() {
     setupWindowController(windowPool, layoutManager, movementManager);
 
     if (currentHeaderState === 'main') {
-        createFeatureWindows(header, ['listen', 'ask', 'settings', 'shortcut-settings']);
+        createFeatureWindows(header, ['listen', 'ask', 'settings', 'shortcut-settings', 'read-choice']);
     }
 
     header.setContentProtection(isContentProtectionOn);
@@ -844,6 +984,9 @@ module.exports = {
     showSettingsWindow,
     hideSettingsWindow,
     cancelHideSettingsWindow,
+    showReadChoiceWindow,
+    hideReadChoiceWindow,
+    cancelHideReadChoiceWindow,
     openLoginPage,
     moveWindowStep,
     handleHeaderStateChanged,

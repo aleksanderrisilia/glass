@@ -253,10 +253,38 @@ function createStreamingLLM({ apiKey, model = "gemini-2.5-flash", temperature = 
                 } else if (part.type === "text") {
                   geminiContent.push(part.text)
                 } else if (part.type === "image_url" && part.image_url) {
-                  const base64Data = part.image_url.url.split(",")[1]
+                  const url = part.image_url.url
+                  // Extract mimeType and base64 data from data URL
+                  let mimeType = "image/png"
+                  let base64Data = url
+                  
+                  if (url.startsWith("data:")) {
+                    const matches = url.match(/^data:([^;]+);base64,(.+)$/)
+                    if (matches) {
+                      mimeType = matches[1] || "image/png"
+                      base64Data = matches[2]
+                    } else {
+                      // Fallback: try to extract base64 after comma
+                      const commaIndex = url.indexOf(",")
+                      if (commaIndex > 0) {
+                        const header = url.substring(5, commaIndex)
+                        if (header.includes("application/pdf")) {
+                          mimeType = "application/pdf"
+                        }
+                        base64Data = url.substring(commaIndex + 1)
+                      }
+                    }
+                  } else {
+                    // Not a data URL, extract base64 from URL
+                    const commaIndex = url.indexOf(",")
+                    if (commaIndex > 0) {
+                      base64Data = url.substring(commaIndex + 1)
+                    }
+                  }
+                  
                   geminiContent.push({
                     inlineData: {
-                      mimeType: "image/png",
+                      mimeType: mimeType,
                       data: base64Data,
                     },
                   })

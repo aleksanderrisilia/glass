@@ -14,6 +14,9 @@ module.exports = {
     ipcMain.on('show-settings-window', () => windowManager.showSettingsWindow());
     ipcMain.on('hide-settings-window', () => windowManager.hideSettingsWindow());
     ipcMain.on('cancel-hide-settings-window', () => windowManager.cancelHideSettingsWindow());
+    ipcMain.on('show-read-choice-window', () => windowManager.showReadChoiceWindow());
+    ipcMain.on('hide-read-choice-window', () => windowManager.hideReadChoiceWindow());
+    ipcMain.on('cancel-hide-read-choice-window', () => windowManager.cancelHideReadChoiceWindow());
 
     ipcMain.handle('open-login-page', () => windowManager.openLoginPage());
     ipcMain.handle('open-personalize-page', () => windowManager.openLoginPage());

@@ -4,6 +4,7 @@ export class MainHeader extends LitElement {
     static properties = {
         isTogglingSession: { type: Boolean, state: true },
         isReading: { type: Boolean, state: true },
+        readProgress: { type: Object, state: true },
         shortcuts: { type: Object, state: true },
         listenSessionStatus: { type: String, state: true },
     };
@@ -215,6 +216,7 @@ export class MainHeader extends LitElement {
             padding: 0 13px;
             background: transparent;
             border-radius: 9000px;
+            pointer-events: auto;
             justify-content: center;
             width: 78px;
             align-items: center;
@@ -257,6 +259,48 @@ export class MainHeader extends LitElement {
             height: 12px;
             position: relative;
             top: 1px;
+        }
+
+        .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            width: 100%;
+        }
+
+        .read-progress {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            width: 100%;
+            min-width: 120px;
+        }
+
+        .progress-text {
+            color: white;
+            font-size: 10px;
+            font-weight: 400;
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 3px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 2px;
+            transition: width 0.3s ease;
         }
 
         .ask-action {
@@ -312,6 +356,10 @@ export class MainHeader extends LitElement {
             display: flex;
             align-items: center;
             justify-content: center;
+        }
+
+        .read-button-container {
+            -webkit-app-region: no-drag;
         }
 
         .settings-button {
@@ -402,6 +450,7 @@ export class MainHeader extends LitElement {
         this.hasSlidIn = false;
         this.settingsHideTimer = null;
         this.isTogglingSession = false;
+        this.isReading = false;
         this.listenSessionStatus = 'beforeSession';
         this.animationEndTimer = null;
         this.handleAnimationEnd = this.handleAnimationEnd.bind(this);
@@ -546,6 +595,15 @@ export class MainHeader extends LitElement {
                 this.shortcuts = keybinds;
             };
             window.api.mainHeader.onShortcutsUpdated(this._shortcutListener);
+
+            // Set up read progress listener
+            if (window.api.mainHeader.onReadProgress) {
+                this._readProgressListener = (event, progressData) => {
+                    this.readProgress = progressData;
+                    this.requestUpdate();
+                };
+                window.api.mainHeader.onReadProgress(this._readProgressListener);
+            }
         }
     }
 
@@ -565,6 +623,9 @@ export class MainHeader extends LitElement {
             if (this._shortcutListener) {
                 window.api.mainHeader.removeOnShortcutsUpdated(this._shortcutListener);
             }
+            if (this._readProgressListener && window.api.mainHeader.removeOnReadProgress) {
+                window.api.mainHeader.removeOnReadProgress(this._readProgressListener);
+            }
         }
     }
 
@@ -582,6 +643,34 @@ export class MainHeader extends LitElement {
         if (window.api) {
             console.log(`[MainHeader] hideSettingsWindow called at ${Date.now()}`);
             window.api.mainHeader.hideSettingsWindow();
+        }
+    }
+
+    showReadChoiceWindow() {
+        if (this.wasJustDragged || this.isReading) return;
+        if (window.api) {
+            console.log(`[MainHeader] showReadChoiceWindow called at ${Date.now()}`);
+            window.api.mainHeader.showReadChoiceWindow();
+        }
+    }
+
+    hideReadChoiceWindow() {
+        if (this.wasJustDragged) return;
+        if (window.api) {
+            console.log(`[MainHeader] hideReadChoiceWindow called at ${Date.now()}`);
+            window.api.mainHeader.hideReadChoiceWindow();
+        }
+    }
+
+    handleClickOutside(event) {
+        // Check if click is outside the read-choice window
+        const readChoiceWindow = document.querySelector('read-choice-view');
+        if (readChoiceWindow && !readChoiceWindow.contains(event.target)) {
+            // Check if click is also not on the Read button
+            const readButton = event.target.closest('.read-button-container');
+            if (!readButton) {
+                this.hideReadChoiceWindow();
+            }
         }
     }
 
@@ -604,27 +693,134 @@ export class MainHeader extends LitElement {
         }
     }
 
-    async _handleReadClick() {
-        if (this.wasJustDragged || this.isReading) return;
 
+
+    async _handleReadTab() {
         this.isReading = true;
+        this.requestUpdate();
+        
         try {
             if (window.api) {
                 const result = await window.api.mainHeader.sendReadButtonClick();
                 if (result && result.success) {
-                    // Show success message or update UI
-                    console.log('[MainHeader] Read successful:', result.data);
+                    console.log('[MainHeader] Read tab successful:', result.data);
                 } else if (result && result.error) {
-                    console.error('[MainHeader] Read failed:', result.error);
-                    // Could show error message to user
+                    console.error('[MainHeader] Read tab failed:', result.error);
+                    alert(`Failed to read tab: ${result.error}`);
                 }
             }
         } catch (error) {
-            console.error('IPC invoke for read button failed:', error);
+            console.error('IPC invoke for read tab failed:', error);
+            alert(`Error: ${error.message}`);
         } finally {
             this.isReading = false;
+            this.requestUpdate();
         }
     }
+
+    async _handleReadPDF() {
+        this.isReading = true;
+        this.readProgress = null;
+        this.requestUpdate();
+        
+        try {
+            if (window.api) {
+                const result = await window.api.mainHeader.sendReadPDFButtonClick();
+                if (result && result.success) {
+                    console.log('[MainHeader] Read PDF successful:', result.data);
+                } else if (result && result.error) {
+                    if (!result.canceled) {
+                        console.error('[MainHeader] Read PDF failed:', result.error);
+                        alert(`Failed to read PDF: ${result.error}`);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('IPC invoke for read PDF failed:', error);
+            alert(`Error: ${error.message}`);
+        } finally {
+            this.isReading = false;
+            this.readProgress = null;
+            this.requestUpdate();
+        }
+    }
+
+    async _handleReadWord() {
+        this.isReading = true;
+        this.readProgress = null;
+        this.requestUpdate();
+        
+        // Set up completion/error listener
+        let contentHandler = null;
+        
+        if (window.api && window.api.mainHeader.onReadContentReceived) {
+            contentHandler = (event, data) => {
+                // Handle completion
+                if (data.success) {
+                    console.log('[MainHeader] Read Word document successful:', data);
+                    this.isReading = false;
+                    this.readProgress = null;
+                    this.requestUpdate();
+                    // Clean up listener
+                    if (window.api && window.api.mainHeader.removeOnReadContentReceived) {
+                        window.api.mainHeader.removeOnReadContentReceived(contentHandler);
+                    }
+                } 
+                // Handle error or cancellation
+                else if (!data.success) {
+                    if (data.canceled) {
+                        // User canceled file picker - clear loading immediately
+                        this.isReading = false;
+                        this.readProgress = null;
+                        this.requestUpdate();
+                    } else {
+                        // Actual error
+                        console.error('[MainHeader] Read Word document failed:', data.error);
+                        alert(`Failed to read Word document: ${data.error}`);
+                        this.isReading = false;
+                        this.readProgress = null;
+                        this.requestUpdate();
+                    }
+                    // Clean up listener
+                    if (window.api && window.api.mainHeader.removeOnReadContentReceived) {
+                        window.api.mainHeader.removeOnReadContentReceived(contentHandler);
+                    }
+                }
+            };
+            
+            window.api.mainHeader.onReadContentReceived(contentHandler);
+        }
+        
+        try {
+            if (window.api) {
+                const result = await window.api.mainHeader.sendReadWordButtonClick();
+                // If file picker was canceled, clear loading state immediately
+                if (result && result.canceled) {
+                    this.isReading = false;
+                    this.readProgress = null;
+                    this.requestUpdate();
+                    // Clean up listener
+                    if (contentHandler && window.api && window.api.mainHeader.removeOnReadContentReceived) {
+                        window.api.mainHeader.removeOnReadContentReceived(contentHandler);
+                    }
+                }
+                // Otherwise, wait for completion/error events from readWord()
+                // Loading state will be cleared by contentHandler when events arrive
+            }
+        } catch (error) {
+            console.error('IPC invoke for read Word document failed:', error);
+            alert(`Error: ${error.message}`);
+            this.isReading = false;
+            this.readProgress = null;
+            this.requestUpdate();
+            // Clean up listener
+            if (contentHandler && window.api && window.api.mainHeader.removeOnReadContentReceived) {
+                window.api.mainHeader.removeOnReadContentReceived(contentHandler);
+            }
+        }
+    }
+
+
 
     async _handleAskClick() {
         if (this.wasJustDragged) return;
@@ -718,28 +914,49 @@ export class MainHeader extends LitElement {
                         `}
                 </button>
 
-                <button 
-                    class="read-button ${this.isReading ? 'active' : ''}"
-                    @click=${this._handleReadClick}
-                    ?disabled=${this.isReading}
+                <div 
+                    class="read-button-container"
+                    style="-webkit-app-region: no-drag;"
+                    @mouseenter=${(e) => this.showReadChoiceWindow(e.currentTarget)}
                 >
-                    ${this.isReading
-                        ? html`
-                            <div class="loading-dots">
-                                <span></span><span></span><span></span>
-                            </div>
-                        `
-                        : html`
-                            <div class="action-text">
-                                <div class="action-text-content">Read</div>
-                            </div>
-                            <div class="read-icon">
-                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M6 1L2 5H5V11H7V5H10L6 1Z" fill="white"/>
-                                </svg>
-                            </div>
-                        `}
-                </button>
+                    <button 
+                        class="read-button ${this.isReading ? 'active' : ''}"
+                        ?disabled=${this.isReading}
+                    >
+                        ${this.isReading
+                            ? html`
+                                <div class="loading-container">
+                                    <div class="loading-dots">
+                                        <span></span><span></span><span></span>
+                                    </div>
+                                    ${this.readProgress 
+                                        ? html`
+                                            <div class="read-progress">
+                                                <div class="progress-text">${this.readProgress.status || `Page ${this.readProgress.currentPage}/${this.readProgress.totalPages}`}</div>
+                                                <div class="progress-bar">
+                                                    <div class="progress-fill" style="width: ${this.readProgress.progress || 0}%"></div>
+                                                </div>
+                                            </div>
+                                        `
+                                        : html`
+                                            <div class="progress-text">Processing document...</div>
+                                        `
+                                    }
+                                </div>
+                            `
+                            : html`
+                                <div class="action-text">
+                                    <div class="action-text-content">Read</div>
+                                </div>
+                                <div class="read-icon">
+                                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M6 1L2 5H5V11H7V5H10L6 1Z" fill="white"/>
+                                    </svg>
+                                </div>
+                            `}
+                    </button>
+                    
+                </div>
 
                 <div class="header-actions ask-action" @click=${() => this._handleAskClick()}>
                     <div class="action-text">

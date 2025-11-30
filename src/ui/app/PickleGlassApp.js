@@ -3,6 +3,7 @@ import { SettingsView } from '../settings/SettingsView.js';
 import { ListenView } from '../listen/ListenView.js';
 import { AskView } from '../ask/AskView.js';
 import { ShortcutSettingsView } from '../settings/ShortCutSettingsView.js';
+import { ReadChoiceView } from '../read/ReadChoiceView.js';
 
 import '../listen/audioCore/renderer.js';
 
@@ -23,7 +24,7 @@ export class PickleGlassApp extends LitElement {
             height: 100%;
         }
 
-        ask-view, settings-view, history-view, help-view, setup-view {
+        ask-view, settings-view, history-view, help-view, setup-view, read-choice-view {
             display: block;
             width: 100%;
             height: 100%;
@@ -152,6 +153,8 @@ export class PickleGlassApp extends LitElement {
                 return html`<help-view></help-view>`;
             case 'setup':
                 return html`<setup-view></setup-view>`;
+            case 'read-choice':
+                return html`<read-choice-view></read-choice-view>`;
             default:
                 return html`<div>Unknown view: ${this.currentView}</div>`;
         }

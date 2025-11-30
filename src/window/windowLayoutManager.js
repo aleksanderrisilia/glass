@@ -93,6 +93,34 @@ class WindowLayoutManager {
         return { x: Math.round(clampedX), y: Math.round(clampedY) };
     }
 
+    calculateReadChoiceWindowPosition() {
+        const header = this.windowPool.get('header');
+        const readChoice = this.windowPool.get('read-choice');
+
+        if (!header || header.isDestroyed() || !readChoice || readChoice.isDestroyed()) {
+            return null;
+        }
+
+        const headerBounds = header.getBounds();
+        const readChoiceBounds = readChoice.getBounds();
+        const display = getCurrentDisplay(header);
+        const { x: workAreaX, y: workAreaY, width: screenWidth, height: screenHeight } = display.workArea;
+
+        const PAD = 5; // Same as settings
+        // Position it directly below the Read button
+        // Read button is after Listen button (~78px) + gap (~4px) = ~82px from left
+        // Read button width is 78px, so center it or align left edge
+        const buttonOffset = 82; // Approximate position of Read button from left edge
+
+        const x = headerBounds.x + buttonOffset;
+        const y = headerBounds.y + headerBounds.height + PAD;
+
+        const clampedX = Math.max(workAreaX + 10, Math.min(workAreaX + screenWidth - readChoiceBounds.width - 10, x));
+        const clampedY = Math.max(workAreaY + 10, Math.min(workAreaY + screenHeight - readChoiceBounds.height - 10, y));
+
+        return { x: Math.round(clampedX), y: Math.round(clampedY) };
+    }
+
 
     calculateHeaderResize(header, { width, height }) {
         if (!header) return null;

@@ -111,11 +111,17 @@ contextBridge.exposeInMainWorld('api', {
     cancelHideSettingsWindow: () => ipcRenderer.send('cancel-hide-settings-window'),
     showSettingsWindow: () => ipcRenderer.send('show-settings-window'),
     hideSettingsWindow: () => ipcRenderer.send('hide-settings-window'),
+    // Read Choice Window Management
+    cancelHideReadChoiceWindow: () => ipcRenderer.send('cancel-hide-read-choice-window'),
+    showReadChoiceWindow: () => ipcRenderer.send('show-read-choice-window'),
+    hideReadChoiceWindow: () => ipcRenderer.send('hide-read-choice-window'),
     
     // Generic invoke (for dynamic channel names)
     // invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
     sendListenButtonClick: (listenButtonText) => ipcRenderer.invoke('listen:changeSession', listenButtonText),
     sendReadButtonClick: () => ipcRenderer.invoke('read:readCurrentTab'),
+    sendReadPDFButtonClick: () => ipcRenderer.invoke('read:readPDFFromFilePicker'),
+    sendReadWordButtonClick: () => ipcRenderer.invoke('read:readWordFromFilePicker'),
     sendAskButtonClick: () => ipcRenderer.invoke('ask:toggleAskButton'),
     sendToggleAllWindowsVisibility: () => ipcRenderer.invoke('shortcut:toggleAllWindowsVisibility'),
     
@@ -123,7 +129,26 @@ contextBridge.exposeInMainWorld('api', {
     onListenChangeSessionResult: (callback) => ipcRenderer.on('listen:changeSessionResult', callback),
     removeOnListenChangeSessionResult: (callback) => ipcRenderer.removeListener('listen:changeSessionResult', callback),
     onShortcutsUpdated: (callback) => ipcRenderer.on('shortcuts-updated', callback),
-    removeOnShortcutsUpdated: (callback) => ipcRenderer.removeListener('shortcuts-updated', callback)
+    removeOnShortcutsUpdated: (callback) => ipcRenderer.removeListener('shortcuts-updated', callback),
+    onReadContentReceived: (callback) => {
+      // Listen to both completion and error events
+      const wrappedCallback = (event, data) => callback(event, data);
+      ipcRenderer.on('read:read-complete', wrappedCallback);
+      ipcRenderer.on('read:read-error', wrappedCallback);
+      // Store the wrapped callback so we can remove it later
+      callback._wrappedCallback = wrappedCallback;
+    },
+    removeOnReadContentReceived: (callback) => {
+      const wrappedCallback = callback._wrappedCallback || callback;
+      ipcRenderer.removeListener('read:read-complete', wrappedCallback);
+      ipcRenderer.removeListener('read:read-error', wrappedCallback);
+    },
+    onReadProgress: (callback) => {
+      ipcRenderer.on('read:read-progress', (event, data) => callback(event, data));
+    },
+    removeOnReadProgress: (callback) => {
+      ipcRenderer.removeListener('read:read-progress', callback);
+    }
   },
 
   // src/ui/app/PermissionHeader.js
@@ -273,6 +298,12 @@ contextBridge.exposeInMainWorld('api', {
     // Listeners
     onLoadShortcuts: (callback) => ipcRenderer.on('shortcut:loadShortcuts', callback),
     removeOnLoadShortcuts: (callback) => ipcRenderer.removeListener('shortcut:loadShortcuts', callback)
+  },
+
+  // src/ui/read/ReadChoiceView.js
+  readChoiceView: {
+    cancelHideReadChoiceWindow: () => ipcRenderer.send('cancel-hide-read-choice-window'),
+    hideReadChoiceWindow: () => ipcRenderer.send('hide-read-choice-window'),
   },
 
   // src/ui/app/content.html inline scripts

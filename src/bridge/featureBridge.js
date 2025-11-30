@@ -120,6 +120,37 @@ module.exports = {
         return { success: false, error: error.message };
       }
     });
+    ipcMain.handle('read:readPDF', async (event, filePath) => {
+      console.log('[FeatureBridge] read:readPDF requested');
+      try {
+        const result = await readService.readPDF(filePath);
+        return result;
+      } catch (error) {
+        console.error('[FeatureBridge] read:readPDF failed', error.message);
+        return { success: false, error: error.message };
+      }
+    });
+  ipcMain.handle('read:readPDFFromFilePicker', async () => {
+    console.log('[FeatureBridge] read:readPDFFromFilePicker requested');
+    try {
+      const result = await readService.readPDFFromFilePicker();
+      return result;
+    } catch (error) {
+      console.error('[FeatureBridge] read:readPDFFromFilePicker failed', error.message);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('read:readWordFromFilePicker', async () => {
+    console.log('[FeatureBridge] read:readWordFromFilePicker requested');
+    try {
+      const result = await readService.readWordFromFilePicker();
+      return result;
+    } catch (error) {
+      console.error('[FeatureBridge] read:readWordFromFilePicker failed', error.message);
+      return { success: false, error: error.message };
+    }
+  });
     ipcMain.handle('read:getLatestContent', async (event, sessionId) => {
       return await readService.getLatestReadContent(sessionId);
     });

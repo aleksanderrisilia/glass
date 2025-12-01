@@ -1,14 +1,16 @@
 const sqliteClient = require('../../../common/services/sqliteClient');
 
-function saveSummary({ uid, sessionId, tldr, text, bullet_json, action_json, model = 'unknown' }) {
+function saveSummary({ uid, sessionId, tldr, text, bullet_json, action_json, mindmap_json, model = 'unknown', generated_at, updated_at }) {
     // uid is ignored in the SQLite implementation
     return new Promise((resolve, reject) => {
         try {
             const db = sqliteClient.getDb();
             const now = Math.floor(Date.now() / 1000);
+            const genAt = generated_at || now;
+            const updAt = updated_at || now;
             const query = `
-                INSERT INTO summaries (session_id, generated_at, model, text, tldr, bullet_json, action_json, updated_at) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO summaries (session_id, generated_at, model, text, tldr, bullet_json, action_json, mindmap_json, updated_at) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     generated_at=excluded.generated_at,
                     model=excluded.model,
@@ -16,10 +18,11 @@ function saveSummary({ uid, sessionId, tldr, text, bullet_json, action_json, mod
                     tldr=excluded.tldr,
                     bullet_json=excluded.bullet_json,
                     action_json=excluded.action_json,
+                    mindmap_json=excluded.mindmap_json,
                     updated_at=excluded.updated_at
             `;
             
-            const result = db.prepare(query).run(sessionId, now, model, text, tldr, bullet_json, action_json, now);
+            const result = db.prepare(query).run(sessionId, genAt, model, text || '', tldr || '', bullet_json || '', action_json || '', mindmap_json || '', updAt);
             resolve({ changes: result.changes });
         } catch (err) {
             console.error('Error saving summary:', err);

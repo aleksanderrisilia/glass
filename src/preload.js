@@ -203,7 +203,9 @@ contextBridge.exposeInMainWorld('api', {
     
     // Listeners
     onSessionStateChanged: (callback) => ipcRenderer.on('session-state-changed', callback),
-    removeOnSessionStateChanged: (callback) => ipcRenderer.removeListener('session-state-changed', callback)
+    removeOnSessionStateChanged: (callback) => ipcRenderer.removeListener('session-state-changed', callback),
+    onMindmapUpdate: (callback) => ipcRenderer.on('mindmap-update', callback),
+    removeOnMindmapUpdate: (callback) => ipcRenderer.removeListener('mindmap-update', callback)
   },
 
   // src/ui/listen/stt/SttView.js

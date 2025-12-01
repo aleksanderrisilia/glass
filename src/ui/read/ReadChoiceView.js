@@ -98,8 +98,20 @@ export class ReadChoiceView extends LitElement {
 
     handleClickOutside = (e) => {
         const container = this.shadowRoot?.querySelector('.read-choice-container');
-        if (container && !container.contains(e.target)) {
-            // Click is outside the menu - hide it
+        // Check if click is outside the menu container
+        // Also check if click is on any button in the header (Listen, Ask, Show/Hide, Settings)
+        const isClickOnHeaderButton = e.target.closest('.listen-button') || 
+                                      e.target.closest('.header-actions') || 
+                                      e.target.closest('.settings-button') ||
+                                      e.target.closest('.read-button-container');
+        
+        if (container && !container.contains(e.target) && !isClickOnHeaderButton) {
+            // Click is outside the menu and not on header buttons - hide it
+            if (window.api && window.api.readChoiceView) {
+                window.api.readChoiceView.hideReadChoiceWindow();
+            }
+        } else if (isClickOnHeaderButton && !e.target.closest('.read-button-container')) {
+            // Click is on another header button (not Read button) - hide the menu
             if (window.api && window.api.readChoiceView) {
                 window.api.readChoiceView.hideReadChoiceWindow();
             }

@@ -1,12 +1,13 @@
 import { html, css, LitElement } from '../assets/lit-core-2.7.4.min.js';
 import './stt/SttView.js';
+import './mindmap/MindmapView.js';
 import './summary/SummaryView.js';
 
 export class ListenView extends LitElement {
     static styles = css`
         :host {
             display: block;
-            width: 400px;
+            width: 600px;
             transform: translate3d(0, 0, 0);
             backface-visibility: hidden;
             transition: transform 0.2s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.2s ease-out;
@@ -518,19 +519,53 @@ export class ListenView extends LitElement {
         this.updateComplete
             .then(() => {
                 const topBar = this.shadowRoot.querySelector('.top-bar');
-                const activeContent = this.viewMode === 'transcript'
-                    ? this.shadowRoot.querySelector('stt-view')
-                    : this.shadowRoot.querySelector('summary-view');
+                
+                let activeContent;
+                if (this.viewMode === 'transcript') {
+                    activeContent = this.shadowRoot.querySelector('stt-view');
+                } else if (this.viewMode === 'mindmap') {
+                    activeContent = this.shadowRoot.querySelector('mindmap-view');
+                } else {
+                    activeContent = this.shadowRoot.querySelector('summary-view');
+                }
 
-                if (!topBar || !activeContent) return;
+                if (!topBar) return;
 
                 const topBarHeight = topBar.offsetHeight;
+                let contentHeight = 0;
+                let minHeight = 0;
 
-                const contentHeight = activeContent.scrollHeight;
+                if (activeContent) {
+                    if (this.viewMode === 'mindmap') {
+                        // For mindmap, always use 220px as base height (600x220 default)
+                        // The container will expand as needed, but start at 220px
+                        const mindmapContainer = activeContent.shadowRoot?.querySelector('.mindmap-container');
+                        if (mindmapContainer) {
+                            // Get the actual height, but ensure it's at least 220px
+                            const actualHeight = mindmapContainer.offsetHeight || 
+                                                parseFloat(getComputedStyle(mindmapContainer).height) || 
+                                                220;
+                            contentHeight = Math.max(actualHeight, 220);
+                            // Ensure the container itself maintains 220px minimum
+                            if (mindmapContainer.offsetHeight < 220) {
+                                mindmapContainer.style.height = '220px';
+                            }
+                        } else {
+                            contentHeight = 220; // Default height for mindmap
+                        }
+                        minHeight = 220; // Minimum height for mindmap
+                    } else {
+                        contentHeight = activeContent.scrollHeight;
+                        minHeight = 150; // Minimum height for other views
+                    }
+                } else {
+                    // If no content found, use minimum based on view mode
+                    minHeight = this.viewMode === 'mindmap' ? 220 : 150;
+                    contentHeight = minHeight;
+                }
 
                 const idealHeight = topBarHeight + contentHeight;
-
-                const targetHeight = Math.min(700, idealHeight);
+                const targetHeight = Math.max(minHeight + topBarHeight, Math.min(700, idealHeight));
 
                 console.log(
                     `[Height Adjusted] Mode: ${this.viewMode}, TopBar: ${topBarHeight}px, Content: ${contentHeight}px, Ideal: ${idealHeight}px, Target: ${targetHeight}px`
@@ -544,8 +579,22 @@ export class ListenView extends LitElement {
     }
 
     toggleViewMode() {
-        this.viewMode = this.viewMode === 'insights' ? 'transcript' : 'insights';
+        // Cycle through: insights → transcript → mindmap → insights
+        if (this.viewMode === 'insights') {
+            this.viewMode = 'transcript';
+        } else if (this.viewMode === 'transcript') {
+            this.viewMode = 'mindmap';
+        } else {
+            this.viewMode = 'insights';
+        }
         this.requestUpdate();
+        
+        // Adjust window height after view mode changes, especially for mindmap
+        this.updateComplete.then(() => {
+            setTimeout(() => {
+                this.adjustWindowHeight();
+            }, 200); // Wait for DOM to update
+        });
     }
 
     handleCopyHover(isHovering) {
@@ -566,9 +615,15 @@ export class ListenView extends LitElement {
         if (this.viewMode === 'transcript') {
             const sttView = this.shadowRoot.querySelector('stt-view');
             textToCopy = sttView ? sttView.getTranscriptText() : '';
-        } else {
+        } else if (this.viewMode === 'insights') {
             const summaryView = this.shadowRoot.querySelector('summary-view');
             textToCopy = summaryView ? summaryView.getSummaryText() : '';
+        } else {
+            // Mindmap view - copy JSON representation
+            const mindmapView = this.shadowRoot.querySelector('mindmap-view');
+            textToCopy = mindmapView && mindmapView.mindmapData 
+                ? JSON.stringify(mindmapView.mindmapData, null, 2) 
+                : '';
         }
 
         try {
@@ -627,10 +682,14 @@ export class ListenView extends LitElement {
         const displayText = this.isHovering
             ? this.viewMode === 'transcript'
                 ? 'Copy Transcript'
-                : 'Copy Glass Analysis'
+                : this.viewMode === 'insights'
+                ? 'Copy Glass Analysis'
+                : 'Copy Mindmap'
             : this.viewMode === 'insights'
-            ? `Live insights`
-            : `Glass is Listening ${this.elapsedTime}`;
+            ? 'Live insights'
+            : this.viewMode === 'transcript'
+            ? 'Transcript'
+            : 'Mindmap';
 
         return html`
             <div class="assistant-container">
@@ -647,6 +706,14 @@ export class ListenView extends LitElement {
                                           <circle cx="12" cy="12" r="3" />
                                       </svg>
                                       <span>Show Transcript</span>
+                                  `
+                                : this.viewMode === 'transcript'
+                                ? html`
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                          <circle cx="12" cy="12" r="10"/>
+                                          <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+                                      </svg>
+                                      <span>Show Mindmap</span>
                                   `
                                 : html`
                                       <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -682,6 +749,10 @@ export class ListenView extends LitElement {
                     .isVisible=${this.viewMode === 'insights'}
                     .hasCompletedRecording=${this.hasCompletedRecording}
                 ></summary-view>
+
+                <mindmap-view 
+                    .isVisible=${this.viewMode === 'mindmap'}
+                ></mindmap-view>
             </div>
         `;
     }

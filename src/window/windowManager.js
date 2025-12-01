@@ -209,7 +209,6 @@ function setupWindowController(windowPool, layoutManager, movementManager) {
         }
     });
     internalBridge.on('window:adjustWindowHeight', ({ winName, targetHeight }) => {
-        console.log(`[Layout Debug] adjustWindowHeight: targetHeight=${targetHeight}`);
         const senderWindow = windowPool.get(winName);
         if (senderWindow) {
             const newBounds = layoutManager.calculateWindowHeightAdjustment(senderWindow, targetHeight);
@@ -507,7 +506,7 @@ function createFeatureWindows(header, namesToCreate) {
         switch (name) {
             case 'listen': {
                 const listen = new BrowserWindow({
-                    ...commonChildOptions, width:400,minWidth:400,maxWidth:900,
+                    ...commonChildOptions, width:600, height:480, minWidth:400, maxWidth:900,
                     maxHeight:900,
                 });
                 listen.setContentProtection(isContentProtectionOn);
@@ -540,7 +539,7 @@ function createFeatureWindows(header, namesToCreate) {
 
             // ask
             case 'ask': {
-                const ask = new BrowserWindow({ ...commonChildOptions, width:600 });
+                const ask = new BrowserWindow({ ...commonChildOptions, width:600, height:480 });
                 ask.setContentProtection(isContentProtectionOn);
                 ask.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
                 if (process.platform === 'darwin') {
@@ -606,7 +605,7 @@ function createFeatureWindows(header, namesToCreate) {
             }
 
             case 'read-choice': {
-                const readChoice = new BrowserWindow({ ...commonChildOptions, width:350, height:140, parent:undefined });
+                const readChoice = new BrowserWindow({ ...commonChildOptions, width:350, height:125, parent:undefined });
                 readChoice.setContentProtection(isContentProtectionOn);
                 readChoice.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
                 if (process.platform === 'darwin') {
@@ -636,34 +635,8 @@ function createFeatureWindows(header, namesToCreate) {
                             // Listen for clicks on the document
                             const handleClickOutside = (e) => {
                                 const container = document.querySelector('read-choice-view')?.shadowRoot?.querySelector('.read-choice-container');
-                                if (container && !container.contains(e.target)) {
-                                    // Click is outside the menu - close it
-                                    if (window.api && window.api.readChoiceView) {
-                                        window.api.readChoiceView.hideReadChoiceWindow();
-                                    }
-                                }
-                            };
-                            
-                            // Add click listener after a short delay to avoid immediate trigger
-                            setTimeout(() => {
-                                document.addEventListener('click', handleClickOutside, true);
-                            }, 100);
-                            
-                            // Clean up on unload
-                            window.addEventListener('beforeunload', () => {
-                                document.removeEventListener('click', handleClickOutside, true);
-                            });
-                        })();
-                    `).catch(console.error);
-                });
-                
-                // Handle clicks outside the window to close it
-                readChoice.webContents.on('did-finish-load', () => {
-                    readChoice.webContents.executeJavaScript(`
-                        (() => {
-                            // Listen for clicks on the document
-                            const handleClickOutside = (e) => {
-                                const container = document.querySelector('read-choice-view')?.shadowRoot?.querySelector('.read-choice-container');
+                                // Check if click is on header buttons (Listen, Ask, Show/Hide, Settings)
+                                // These are in the header window, so we need to close the menu when they're clicked
                                 if (container && !container.contains(e.target)) {
                                     // Click is outside the menu - close it
                                     if (window.api && window.api.readChoiceView) {
@@ -913,11 +886,11 @@ function createWindows() {
     }
 
     header.on('focus', () => {
-        console.log('[WindowManager] Header gained focus');
+        // Header gained focus - no action needed
     });
 
     header.on('blur', () => {
-        console.log('[WindowManager] Header lost focus');
+        // Header lost focus - no action needed
     });
 
     header.webContents.on('before-input-event', (event, input) => {

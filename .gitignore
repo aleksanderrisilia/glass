@@ -113,3 +113,8 @@ data/*.db-wal
 out/
 dist/
 build/ 
+# ArchDoc configuration (contains API keys)
+.archdoc.config.json
+
+# PR Agent configuration (contains API keys)
+.pragent.config.json

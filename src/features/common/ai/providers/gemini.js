@@ -117,22 +117,33 @@ function createLLM({ apiKey, model = "gemini-2.5-flash", temperature = 0.7, maxT
     },
 
     chat: async (messages) => {
-      // Filter out any system prompts that might be causing JSON responses
+      // Check if system instruction explicitly requests JSON
       let systemInstruction = ""
+      let requestsJSON = false
       const history = []
       let lastMessage
 
       messages.forEach((msg, index) => {
         if (msg.role === "system") {
-          // Clean system instruction - avoid JSON formatting requests
           systemInstruction = msg.content
-            .replace(/respond in json/gi, "")
-            .replace(/format.*json/gi, "")
-            .replace(/return.*json/gi, "")
+          
+          // Check if JSON is explicitly requested
+          requestsJSON = systemInstruction.toLowerCase().includes('json') ||
+                        systemInstruction.toLowerCase().includes('return only') ||
+                        systemInstruction.toLowerCase().includes('valid json')
+          
+          // Only clean JSON instructions if JSON is NOT requested
+          if (!requestsJSON) {
+            // Clean system instruction - avoid JSON formatting requests
+            systemInstruction = systemInstruction
+              .replace(/respond in json/gi, "")
+              .replace(/format.*json/gi, "")
+              .replace(/return.*json/gi, "")
 
-          // Add explicit instruction for natural text
-          if (!systemInstruction.includes("respond naturally")) {
-            systemInstruction += "\n\nRespond naturally in plain text, not in JSON or structured format."
+            // Add explicit instruction for natural text
+            if (!systemInstruction.includes("respond naturally")) {
+              systemInstruction += "\n\nRespond naturally in plain text, not in JSON or structured format."
+            }
           }
           return
         }
@@ -145,17 +156,15 @@ function createLLM({ apiKey, model = "gemini-2.5-flash", temperature = 0.7, maxT
           history.push({ role, parts: [{ text: msg.content }] })
         }
       })
-
+      
       const geminiModel = client.getGenerativeModel({
         model: model,
-        systemInstruction:
-          systemInstruction ||
-          "Respond naturally in plain text format. Do not use JSON or structured responses unless specifically requested.",
+        systemInstruction: systemInstruction || undefined,
         generationConfig: {
           temperature: temperature,
           maxOutputTokens: maxTokens,
-          // Force plain text responses
-          responseMimeType: "text/plain",
+          // Use JSON mode if explicitly requested, otherwise plain text
+          responseMimeType: requestsJSON ? "application/json" : "text/plain",
         },
       })
 
@@ -189,9 +198,50 @@ function createLLM({ apiKey, model = "gemini-2.5-flash", temperature = 0.7, maxT
       const result = await chat.sendMessage(content)
       const response = await result.response
 
-      // Return plain text content
+      // Handle JSON mode responses - they might be in response.text() or response.candidates[0].content.parts[0].text
+      let contentText = '';
+      try {
+        // Primary method: response.text()
+        if (response.text && typeof response.text === 'function') {
+          contentText = response.text();
+        } else if (typeof response.text === 'string') {
+          contentText = response.text;
+        }
+        
+        // Fallback: check candidates array (for JSON mode or structured responses)
+        if (!contentText && response.candidates && response.candidates.length > 0) {
+          const candidate = response.candidates[0];
+          if (candidate.content && candidate.content.parts) {
+            const parts = candidate.content.parts;
+            contentText = parts
+              .map(part => {
+                if (part.text) return part.text;
+                // For JSON mode, the part might be the JSON directly
+                if (typeof part === 'string') return part;
+                return '';
+              })
+              .filter(text => text.length > 0)
+              .join('');
+          }
+        }
+        
+        // Last resort: check if response itself is a string
+        if (!contentText && typeof response === 'string') {
+          contentText = response;
+        }
+      } catch (error) {
+        console.error('[Gemini Provider] Error extracting response text:', error);
+        console.error('[Gemini Provider] Response structure:', {
+          hasText: !!response.text,
+          textType: typeof response.text,
+          hasCandidates: !!(response.candidates && response.candidates.length > 0),
+          responseKeys: Object.keys(response || {})
+        });
+      }
+
+      // Return content with raw for debugging
       return {
-        content: response.text(),
+        content: contentText || '',
         raw: result,
       }
     },
@@ -354,3 +404,4 @@ module.exports = {
     createLLM,
     createStreamingLLM
 };
+

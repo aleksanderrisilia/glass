@@ -1,6 +1,7 @@
 const { BrowserWindow } = require('electron');
 const SttService = require('./stt/sttService');
 const SummaryService = require('./summary/summaryService');
+const MindmapService = require('./mindmap/mindmapService');
 const authService = require('../common/services/authService');
 const sessionRepository = require('../common/repositories/session');
 const sttRepository = require('./stt/repositories');
@@ -10,6 +11,7 @@ class ListenService {
     constructor() {
         this.sttService = new SttService();
         this.summaryService = new SummaryService();
+        this.mindmapService = new MindmapService();
         this.currentSessionId = null;
         this.isInitializingSession = false;
 
@@ -32,6 +34,20 @@ class ListenService {
         this.summaryService.setCallbacks({
             onAnalysisComplete: (data) => {
                 console.log('📊 Analysis completed:', data);
+            },
+            onStatusUpdate: (status) => {
+                this.sendToRenderer('update-status', status);
+            }
+        });
+
+        // Mindmap service callbacks
+        this.mindmapService.setCallbacks({
+            onMindmapUpdate: (mindmap) => {
+                console.log('🗺️ [ListenService] Mindmap updated:', mindmap.nodes.length, 'nodes');
+                console.log('🗺️ [ListenService] Sending mindmap to renderer via IPC...');
+                // Send mindmap data to renderer via IPC
+                this.sendToRenderer('mindmap-update', mindmap);
+                console.log('🗺️ [ListenService] Mindmap sent to renderer');
             },
             onStatusUpdate: (status) => {
                 this.sendToRenderer('update-status', status);
@@ -104,6 +120,9 @@ class ListenService {
         
         // Add to summary service for analysis
         this.summaryService.addConversationTurn(speaker, text);
+        
+        // Add to mindmap service for mindmap generation
+        this.mindmapService.addConversationTurn(speaker, text);
     }
 
     async saveConversationTurn(speaker, transcription) {
@@ -141,6 +160,9 @@ class ListenService {
 
             // Set session ID for summary service
             this.summaryService.setSessionId(this.currentSessionId);
+            
+            // Set session ID for mindmap service
+            this.mindmapService.setSessionId(this.currentSessionId);
             
             // Reset conversation history
             this.summaryService.resetConversationHistory();
@@ -228,6 +250,10 @@ class ListenService {
         return this.sttService.isSessionActive();
     }
 
+    getCurrentSessionId() {
+        return this.currentSessionId;
+    }
+
     async closeSession() {
         try {
             this.sendToRenderer('change-listen-capture-state', { status: "stop" });
@@ -245,6 +271,8 @@ class ListenService {
             // Reset state
             this.currentSessionId = null;
             this.summaryService.resetConversationHistory();
+            this.mindmapService.resetConversationHistory();
+            this.mindmapService.stopUpdateTimer();
 
             console.log('Listen service session closed.');
             return { success: true };

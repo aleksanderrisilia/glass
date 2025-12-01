@@ -65,7 +65,7 @@ export class MainHeader extends LitElement {
             top: 0; left: 0; right: 0; bottom: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.6);
+            background: rgba(0, 0, 0, 1);
             border-radius: 9000px;
             z-index: -1;
         }
@@ -115,32 +115,32 @@ export class MainHeader extends LitElement {
         }
 
         .listen-button.done {
-            background-color: rgba(255, 255, 255, 0.6);
+            background-color: rgba(255, 255, 255, 0.15);
             transition: background-color 0.15s ease;
         }
 
         .listen-button.done .action-text-content {
-            color: black;
+            color: white;
         }
         
         .listen-button.done .listen-icon svg rect,
         .listen-button.done .listen-icon svg path {
-            fill: black;
+            fill: white;
         }
 
         .listen-button.done:hover {
-            background-color: #f0f0f0;
+            background-color: rgba(255, 255, 255, 0.2);
         }
 
         .listen-button:hover::before {
-            background: rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.1);
         }
 
         .listen-button::before {
             content: '';
             position: absolute;
             top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(255, 255, 255, 0.14);
+            background: rgba(255, 255, 255, 0.08);
             border-radius: 9000px;
             z-index: -1;
             transition: background 0.15s ease;
@@ -207,7 +207,7 @@ export class MainHeader extends LitElement {
         }
 
         .header-actions:hover {
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.08);
         }
 
         .read-button {
@@ -234,7 +234,7 @@ export class MainHeader extends LitElement {
         }
 
         .read-button:hover::before {
-            background: rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.1);
         }
 
         .read-button::before {
@@ -251,7 +251,7 @@ export class MainHeader extends LitElement {
         }
 
         .read-button.active::before {
-            background: rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.12);
         }
 
         .read-icon svg {
@@ -631,6 +631,8 @@ export class MainHeader extends LitElement {
 
     showSettingsWindow(element) {
         if (this.wasJustDragged) return;
+        // Close read-choice menu if open
+        this.hideReadChoiceWindow();
         if (window.api) {
             console.log(`[MainHeader] showSettingsWindow called at ${Date.now()}`);
             window.api.mainHeader.showSettingsWindow();
@@ -676,6 +678,8 @@ export class MainHeader extends LitElement {
 
     async _handleListenClick() {
         if (this.wasJustDragged) return;
+        // Close read-choice menu if open
+        this.hideReadChoiceWindow();
         if (this.isTogglingSession) {
             return;
         }
@@ -824,6 +828,8 @@ export class MainHeader extends LitElement {
 
     async _handleAskClick() {
         if (this.wasJustDragged) return;
+        // Close read-choice menu if open
+        this.hideReadChoiceWindow();
 
         try {
             if (window.api) {
@@ -836,6 +842,8 @@ export class MainHeader extends LitElement {
 
     async _handleToggleAllWindowsVisibility() {
         if (this.wasJustDragged) return;
+        // Close read-choice menu if open
+        this.hideReadChoiceWindow();
 
         try {
             if (window.api) {

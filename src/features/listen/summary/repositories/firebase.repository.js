@@ -3,7 +3,7 @@ const { getFirestoreInstance } = require('../../../common/services/firebaseClien
 const { createEncryptedConverter } = require('../../../common/repositories/firestoreConverter');
 const encryptionService = require('../../../common/services/encryptionService');
 
-const fieldsToEncrypt = ['tldr', 'text', 'bullet_json', 'action_json'];
+const fieldsToEncrypt = ['tldr', 'text', 'bullet_json', 'action_json', 'mindmap_json'];
 const summaryConverter = createEncryptedConverter(fieldsToEncrypt);
 
 function summaryDocRef(sessionId) {
@@ -14,18 +14,21 @@ function summaryDocRef(sessionId) {
     return doc(db, docPath).withConverter(summaryConverter);
 }
 
-async function saveSummary({ uid, sessionId, tldr, text, bullet_json, action_json, model = 'unknown' }) {
+async function saveSummary({ uid, sessionId, tldr, text, bullet_json, action_json, mindmap_json, model = 'unknown', generated_at, updated_at }) {
     const now = Timestamp.now();
+    const genAt = generated_at || now;
+    const updAt = updated_at || now;
     const summaryData = {
         uid, // To know who generated the summary
         session_id: sessionId,
-        generated_at: now,
+        generated_at: genAt instanceof Timestamp ? genAt : Timestamp.fromMillis(typeof genAt === 'number' ? genAt * 1000 : Date.now()),
         model,
-        text,
-        tldr,
-        bullet_json,
-        action_json,
-        updated_at: now,
+        text: text || '',
+        tldr: tldr || '',
+        bullet_json: bullet_json || '',
+        action_json: action_json || '',
+        mindmap_json: mindmap_json || '',
+        updated_at: updAt instanceof Timestamp ? updAt : Timestamp.fromMillis(typeof updAt === 'number' ? updAt * 1000 : Date.now()),
     };
     
     // The converter attached to summaryDocRef will handle encryption via its `toFirestore` method.

@@ -15,6 +15,7 @@ const getWindowPool = () => {
 const sessionRepository = require('../common/repositories/session');
 const askRepository = require('./repositories');
 const readRepository = require('../read/repositories');
+const sttRepository = require('../listen/stt/repositories');
 const { getSystemPrompt } = require('../common/prompts/promptBuilder');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -212,6 +213,136 @@ class AskService {
     }
 
     /**
+     * Formats a timestamp (Unix seconds) to HH:MM:SS format
+     * @param {number} timestamp - Unix timestamp in seconds
+     * @returns {string} - Formatted time string
+     * @private
+     */
+    _formatTimestamp(timestamp) {
+        const date = new Date(timestamp * 1000);
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        return `${hours}:${minutes}:${seconds}`;
+    }
+
+    /**
+     * Formats transcripts for context with timestamps and speaker labels
+     * @param {Array} transcripts - Array of transcript objects
+     * @returns {string} - Formatted transcript string
+     * @private
+     */
+    _formatTranscriptsForContext(transcripts) {
+        if (!transcripts || transcripts.length === 0) {
+            return '';
+        }
+
+        return transcripts
+            .map(transcript => {
+                const timestamp = this._formatTimestamp(transcript.start_at || transcript.created_at);
+                const speaker = transcript.speaker === 'me' ? 'You' : 'Speaker';
+                const text = transcript.text || '';
+                return `[${timestamp}] ${speaker}: ${text}`;
+            })
+            .join('\n');
+    }
+
+    /**
+     * Gets live transcript context from the active listen session
+     * @param {string} askSessionId - The Ask session ID (for checking read content override)
+     * @returns {Promise<{context: string, sessionId: string} | null>} - Transcript context or null
+     * @private
+     */
+    async _getLiveTranscriptContext(askSessionId) {
+        try {
+            // Lazy require to avoid circular dependency
+            const listenService = require('../listen/listenService');
+            
+            if (!listenService) {
+                console.log('[AskService] ListenService not available');
+                return null;
+            }
+
+            // Get active listen session ID
+            const listenSessionId = listenService.getCurrentSessionId();
+            if (!listenSessionId) {
+                console.log('[AskService] No active listen session');
+                return null;
+            }
+
+            // Check if listening has stopped and read content was triggered
+            const isListeningActive = listenService.isSessionActive();
+            if (!isListeningActive) {
+                // Check if read content exists and is recent (read overrides transcripts when listening stopped)
+                try {
+                    const readContent = await readRepository.getLatestBySessionId(askSessionId);
+                    if (readContent && readContent.html_content) {
+                        const now = Math.floor(Date.now() / 1000);
+                        const readTime = readContent.read_at || readContent.created_at;
+                        const timeDiff = now - readTime;
+                        
+                        // If read content is recent (within 5 minutes), it overrides transcripts
+                        if (timeDiff < 300) {
+                            console.log('[AskService] Read content overrides transcripts (listening stopped)');
+                            return null; // Return null to use read content instead
+                        }
+                    }
+                } catch (error) {
+                    console.warn('[AskService] Failed to check read content override:', error);
+                }
+            }
+
+            // Fetch transcripts from the active listen session
+            const transcripts = await sttRepository.getAllTranscriptsBySessionId(listenSessionId);
+            if (!transcripts || transcripts.length === 0) {
+                console.log('[AskService] No transcripts found for session', listenSessionId);
+                return null;
+            }
+
+            // Format transcripts
+            const formattedContext = this._formatTranscriptsForContext(transcripts);
+            console.log(`[AskService] Using live transcript context from session ${listenSessionId} (${transcripts.length} transcripts, ${formattedContext.length} chars)`);
+            
+            return {
+                context: formattedContext,
+                sessionId: listenSessionId
+            };
+        } catch (error) {
+            console.warn('[AskService] Failed to get live transcript context:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Polls for new transcripts and updates context if new ones arrive
+     * @param {string} listenSessionId - The listen session ID to poll
+     * @param {number} lastTranscriptCount - Last known transcript count
+     * @param {number} maxPolls - Maximum number of polls
+     * @param {number} pollInterval - Poll interval in milliseconds
+     * @returns {Promise<string | null>} - Updated context or null if no new transcripts
+     * @private
+     */
+    async _pollForNewTranscripts(listenSessionId, lastTranscriptCount, maxPolls = 10, pollInterval = 500) {
+        for (let i = 0; i < maxPolls; i++) {
+            await new Promise(resolve => setTimeout(resolve, pollInterval));
+            
+            try {
+                const transcripts = await sttRepository.getAllTranscriptsBySessionId(listenSessionId);
+                if (transcripts && transcripts.length > lastTranscriptCount) {
+                    const newTranscripts = transcripts.slice(lastTranscriptCount);
+                    const formattedNewContext = this._formatTranscriptsForContext(newTranscripts);
+                    console.log(`[AskService] Found ${newTranscripts.length} new transcripts during processing`);
+                    return formattedNewContext;
+                }
+            } catch (error) {
+                console.warn('[AskService] Error polling for new transcripts:', error);
+                break;
+            }
+        }
+        return null;
+    }
+
+    /**
      * 
      * @param {string} userPrompt
      * @returns {Promise<{success: boolean, response?: string, error?: string}>}
@@ -253,73 +384,106 @@ class AskService {
             const screenshotResult = await captureScreenshot({ quality: 'medium' });
             const screenshotBase64 = screenshotResult.success ? screenshotResult.base64 : null;
 
-            // Get latest read content for this session (if available)
-            let readContent = null;
+            // PRIORITY 1: Get live transcript context (completely overrides everything if available)
+            let liveTranscriptContext = null;
+            let listenSessionId = null;
+            let lastTranscriptCount = 0;
             try {
-                readContent = await readRepository.getLatestBySessionId(sessionId);
+                const transcriptResult = await this._getLiveTranscriptContext(sessionId);
+                if (transcriptResult) {
+                    liveTranscriptContext = transcriptResult.context;
+                    listenSessionId = transcriptResult.sessionId;
+                    // Get transcript count for polling
+                    const transcripts = await sttRepository.getAllTranscriptsBySessionId(listenSessionId);
+                    lastTranscriptCount = transcripts ? transcripts.length : 0;
+                }
             } catch (error) {
-                console.warn('[AskService] Failed to get read content:', error);
+                console.warn('[AskService] Failed to get live transcript context:', error);
+            }
+
+            // PRIORITY 2: Get read content (only if no live transcripts)
+            let readContent = null;
+            let useReadContent = false;
+            let readTextContent = '';
+            if (!liveTranscriptContext) {
+                try {
+                    readContent = await readRepository.getLatestBySessionId(sessionId);
+                } catch (error) {
+                    console.warn('[AskService] Failed to get read content:', error);
+                }
+
+                // Check if read content is recent (within last 5 minutes)
+                if (readContent && readContent.html_content) {
+                    const now = Math.floor(Date.now() / 1000);
+                    const readTime = readContent.read_at || readContent.created_at;
+                    const timeDiff = now - readTime;
+                    
+                    // Use read content if it's less than 5 minutes old
+                    if (timeDiff < 300) {
+                        useReadContent = true;
+                        // Extract text from HTML (simple approach - remove tags)
+                        readTextContent = readContent.html_content
+                            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+                            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                            .replace(/<[^>]+>/g, ' ')
+                            .replace(/\s+/g, ' ')
+                            .trim()
+                            .substring(0, 50000); // Limit to 50k chars for better context
+                        
+                        console.log(`[AskService] Using read content from ${readContent.url} (${readTextContent.length} chars)`);
+                    }
+                }
             }
 
             const conversationHistory = this._formatConversationForPrompt(conversationHistoryRaw);
 
-            // Check if read content is recent (within last 5 minutes)
-            let useReadContent = false;
-            let readTextContent = '';
-            if (readContent && readContent.html_content) {
-                const now = Math.floor(Date.now() / 1000);
-                const readTime = readContent.read_at || readContent.created_at;
-                const timeDiff = now - readTime;
-                
-                // Use read content if it's less than 5 minutes old
-                if (timeDiff < 300) {
-                    useReadContent = true;
-                    // Extract text from HTML (simple approach - remove tags)
-                    readTextContent = readContent.html_content
-                        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-                        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-                        .replace(/<[^>]+>/g, ' ')
-                        .replace(/\s+/g, ' ')
-                        .trim()
-                        .substring(0, 50000); // Limit to 50k chars for better context
-                    
-                    console.log(`[AskService] Using read content from ${readContent.url} (${readTextContent.length} chars)`);
-                }
-            }
-
-            // Build context string - prioritize read content over conversation history when available
+            // Build context string - prioritize live transcripts, then read content, then conversation history
             let contextString = conversationHistory;
-            if (useReadContent) {
+            if (liveTranscriptContext) {
+                contextString = `Live Conversation Transcript:\n${liveTranscriptContext}`;
+            } else if (useReadContent) {
                 contextString = `Chrome Tab Content (from ${readContent.url || 'current tab'}):\n${readTextContent}\n\n${conversationHistory}`;
             }
 
-            const systemPrompt = getSystemPrompt('pickle_glass_analysis', contextString, false);
+            let systemPrompt = getSystemPrompt('pickle_glass_analysis', contextString, false);
 
-            // Build user message - include read content prominently if available
+            // Build user message - prioritize live transcripts, then read content, then normal format
             const userMessageContent = [];
             
-            if (useReadContent) {
+            if (liveTranscriptContext) {
+                // Add live transcript context prominently in user message
+                // Limit to last 30k chars to prevent token overflow
+                const truncatedTranscript = liveTranscriptContext.length > 30000 
+                    ? liveTranscriptContext.substring(liveTranscriptContext.length - 30000)
+                    : liveTranscriptContext;
+                
+                userMessageContent.push({
+                    type: 'text',
+                    text: `Live Conversation Transcript:\n\n${truncatedTranscript}\n\n---\n\nUser Request: ${userPrompt.trim()}`
+                });
+                console.log('[AskService] Using live transcript context in user message');
+            } else if (useReadContent) {
                 // Add read content as text in user message (more prominent than system prompt)
                 userMessageContent.push({
                     type: 'text',
                     text: `Context from Chrome tab (${readContent.url || 'current tab'}):\n\n${readTextContent.substring(0, 30000)}\n\n---\n\nUser Request: ${userPrompt.trim()}`
                 });
             } else {
-                // No read content, use normal format
+                // No special context, use normal format
                 userMessageContent.push({
                     type: 'text',
                     text: `User Request: ${userPrompt.trim()}`
                 });
             }
 
-            // Only include screenshot if we don't have read content (read content is more accurate)
-            if (!useReadContent && screenshotBase64) {
+            // Only include screenshot if we don't have live transcripts or read content
+            if (!liveTranscriptContext && !useReadContent && screenshotBase64) {
                 userMessageContent.push({
                     type: 'image_url',
                     image_url: { url: `data:image/jpeg;base64,${screenshotBase64}` },
                 });
-            } else if (useReadContent) {
-                console.log('[AskService] Skipping screenshot - using read content instead');
+            } else if (liveTranscriptContext || useReadContent) {
+                console.log('[AskService] Skipping screenshot - using transcript/read content instead');
             }
 
             const messages = [
@@ -330,6 +494,30 @@ class AskService {
                 },
             ];
             
+            // Poll for new transcripts if we're using live transcript context
+            // This ensures we have the latest context before sending
+            if (liveTranscriptContext && listenSessionId) {
+                console.log('[AskService] Polling for new transcripts before sending request...');
+                const newTranscriptContext = await this._pollForNewTranscripts(listenSessionId, lastTranscriptCount, 5, 300);
+                if (newTranscriptContext) {
+                    // Append new transcripts to existing context
+                    liveTranscriptContext += '\n' + newTranscriptContext;
+                    // Update the user message with latest context
+                    const truncatedTranscript = liveTranscriptContext.length > 30000 
+                        ? liveTranscriptContext.substring(liveTranscriptContext.length - 30000)
+                        : liveTranscriptContext;
+                    userMessageContent[0] = {
+                        type: 'text',
+                        text: `Live Conversation Transcript:\n\n${truncatedTranscript}\n\n---\n\nUser Request: ${userPrompt.trim()}`
+                    };
+                    // Update system prompt context too
+                    contextString = `Live Conversation Transcript:\n${liveTranscriptContext}`;
+                    const systemPrompt = getSystemPrompt('pickle_glass_analysis', contextString, false);
+                    messages[0] = { role: 'system', content: systemPrompt };
+                    console.log('[AskService] Updated context with new transcripts');
+                }
+            }
+
             const streamingLLM = createStreamingLLM(modelInfo.provider, {
                 apiKey: modelInfo.apiKey,
                 model: modelInfo.model,
